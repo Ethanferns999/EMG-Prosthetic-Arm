@@ -1,0 +1,250 @@
+#include <Servo.h>
+
+// ==============================
+// SERVO OBJECTS
+// ==============================
+Servo wrist;
+
+Servo little;
+
+Servo ringF;
+
+Servo middle;
+
+Servo pointer;
+
+Servo thumb;
+
+// ==============================
+// SERVO PINS
+// ==============================
+#define WRIST_PIN    3
+#define LITTLE_PIN   5
+#define RING_PIN     6
+#define MIDDLE_PIN   9
+#define POINTER_PIN  10
+#define THUMB_PIN    11
+
+String command = "";
+
+// ==============================
+// SETUP
+// ==============================
+void setup() {
+
+  Serial.begin(115200);
+
+  wrist.attach(WRIST_PIN);
+
+  little.attach(LITTLE_PIN);
+
+  ringF.attach(RING_PIN);
+
+  middle.attach(MIDDLE_PIN);
+
+  pointer.attach(POINTER_PIN);
+
+  thumb.attach(THUMB_PIN);
+
+  openHand();
+
+  delay(1000);
+}
+
+// ==============================
+// OPEN HAND
+// ==============================
+void openHand() {
+
+  little.write(20);
+
+  ringF.write(20);
+
+  middle.write(20);
+
+  pointer.write(20);
+
+  thumb.write(20);
+}
+
+// ==============================
+// CLOSE HAND
+// ==============================
+void closeHand() {
+
+  little.write(120);
+
+  ringF.write(120);
+
+  middle.write(120);
+
+  pointer.write(120);
+
+  thumb.write(120);
+}
+
+// ==============================
+// INDIVIDUAL FINGERS
+// ==============================
+void thumbToggle() {
+
+  thumb.write(120);
+
+  delay(300);
+
+  thumb.write(20);
+}
+
+void pointerToggle() {
+
+  pointer.write(120);
+
+  delay(300);
+
+  pointer.write(20);
+}
+
+void middleToggle() {
+
+  middle.write(120);
+
+  delay(300);
+
+  middle.write(20);
+}
+
+void ringToggle() {
+
+  ringF.write(120);
+
+  delay(300);
+
+  ringF.write(20);
+}
+
+void littleToggle() {
+
+  little.write(120);
+
+  delay(300);
+
+  little.write(20);
+}
+
+// ==============================
+// WRIST
+// ==============================
+void pronation() {
+
+  wrist.write(40);
+}
+
+void supination() {
+
+  wrist.write(140);
+}
+
+// ==============================
+// REST
+// ==============================
+void restPose() {
+
+  wrist.write(90);
+
+  little.write(60);
+
+  ringF.write(60);
+
+  middle.write(60);
+
+  pointer.write(60);
+
+  thumb.write(60);
+}
+
+// ==============================
+// LOOP
+// ==============================
+void loop() {
+
+  // ==========================
+  // RECEIVE COMMANDS
+  // ==========================
+  if (Serial.available()) {
+
+    command = Serial.readStringUntil('\n');
+
+    command.trim();
+
+    // ==========================
+    // FULL HAND
+    // ==========================
+    if (command == "OPEN") {
+
+      openHand();
+    }
+
+    else if (command == "CLOSE") {
+
+      closeHand();
+    }
+
+    // ==========================
+    // WRIST
+    // ==========================
+    else if (command == "PRONATION") {
+
+      pronation();
+    }
+
+    else if (command == "SUPINATION") {
+
+      supination();
+    }
+
+    // ==========================
+    // INDIVIDUAL FINGERS
+    // ==========================
+    else if (command == "THUMB") {
+
+      thumbToggle();
+    }
+
+    else if (command == "POINTER") {
+
+      pointerToggle();
+    }
+
+    else if (command == "MIDDLE") {
+
+      middleToggle();
+    }
+
+    else if (command == "RING") {
+
+      ringToggle();
+    }
+
+    else if (command == "LITTLE") {
+
+      littleToggle();
+    }
+
+    // ==========================
+    // REST
+    // ==========================
+    else if (command == "REST") {
+
+      restPose();
+    }
+  }
+
+  // ==========================
+  // SEND EMG TO PYTHON
+  // ==========================
+  int emg = analogRead(A0);
+
+  Serial.println(emg);
+
+  delay(5);
+}
