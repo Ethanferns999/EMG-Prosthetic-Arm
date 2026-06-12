@@ -1,0 +1,650 @@
+import serial
+import numpy as np
+import time
+from collections import deque
+import tkinter as tk
+
+# ==============================
+# FILTERS
+# ==============================
+from scipy.signal import butter, filtfilt, iirnotch
+
+# ==============================
+# MACHINE LEARNING
+# ==============================
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+
+# ==============================
+# SERIAL
+# ==============================
+ser = serial.Serial(
+    'COM3',   # CHANGE PORT IF NEEDED
+    115200,
+    timeout=0.1
+)
+
+time.sleep(2)
+
+ser.reset_input_buffer()
+
+# ==============================
+# GESTURES
+# ==============================
+gestures = [
+    "rest",
+    "open",
+    "close",
+    "pronation",
+    "supination"
+]
+
+# ==============================
+# SETTINGS
+# ==============================
+window_size = 80
+
+step = 20
+
+data = []
+
+labels = []
+
+# ==============================
+# FILTERS
+# ==============================
+def notch_filter(data, freq=50, fs=1000, Q=30):
+
+    b, a = iirnotch(freq, Q, fs)
+
+    return filtfilt(b, a, data)
+
+def bandpass_filter(
+    data,
+    lowcut=20,
+    highcut=450,
+    fs=1000,
+    order=4
+):
+
+    nyquist = 0.5 * fs
+
+    low = lowcut / nyquist
+
+    high = highcut / nyquist
+
+    b, a = butter(
+        order,
+        [low, high],
+        btype='band'
+    )
+
+    return filtfilt(b, a, data)
+
+# ==============================
+# FEATURE EXTRACTION
+# ==============================
+def extract_features(signal):
+
+    mav = np.mean(np.abs(signal))
+
+    rms = np.sqrt(np.mean(signal**2))
+
+    wl = np.sum(np.abs(np.diff(signal)))
+
+    zc = np.sum(
+        np.diff(np.sign(signal)) != 0
+    )
+
+    ssc = np.sum(
+        np.diff(
+            np.sign(
+                np.diff(signal)
+            )
+        ) != 0
+    )
+
+    variance = np.var(signal)
+
+    return [
+        mav,
+        rms,
+        wl,
+        zc,
+        ssc,
+        variance
+    ]
+
+# ==============================
+# SAFE SERIAL READ
+# ==============================
+def read_emg():
+
+    try:
+
+        line = ser.readline().decode(
+            'utf-8',
+            errors='ignore'
+        ).strip()
+
+        if line == "":
+            return None
+
+        if not line.isdigit():
+            return None
+
+        val = float(line)
+
+        if val < 0 or val > 1023:
+            return None
+
+        return val
+
+    except:
+        return None
+
+# ==============================
+# DATA COLLECTION
+# ==============================
+def collect_data(gesture, duration=8):
+
+    print("\n===================================")
+
+    print(f"👉 PERFORM: {gesture.upper()}")
+
+    print("Hold steadily...")
+
+    print("===================================")
+
+    time.sleep(2)
+
+    buffer = []
+
+    collected = []
+
+    start = time.time()
+
+    while time.time() - start < duration:
+
+        val = read_emg()
+
+        if val is None:
+            continue
+
+        buffer.append(val)
+
+        if len(buffer) >= window_size:
+
+            try:
+
+                seg = np.array(
+                    buffer[-window_size:]
+                )
+
+                seg = notch_filter(seg)
+
+                seg = bandpass_filter(seg)
+
+                seg = seg / 1023.0
+
+                seg = (
+                    seg - np.mean(seg)
+                ) / (
+                    np.std(seg) + 1e-8
+                )
+
+                features = extract_features(seg)
+
+                collected.append(features)
+
+                buffer = buffer[step:]
+
+            except:
+                continue
+
+    print(
+        f"✅ {gesture}: "
+        f"{len(collected)} samples"
+    )
+
+    return collected
+
+# ==============================
+# COLLECT TRAINING DATA
+# ==============================
+for g in gestures:
+
+    samples = collect_data(g)
+
+    for s in samples:
+
+        data.append(s)
+
+        labels.append(g)
+
+# ==============================
+# CHECK DATA
+# ==============================
+if len(data) == 0:
+
+    print("\n❌ NO EMG DATA RECEIVED")
+
+    exit()
+
+# ==============================
+# LABEL ENCODING
+# ==============================
+X = np.array(data)
+
+le = LabelEncoder()
+
+y = le.fit_transform(labels)
+
+print("\n📊 TOTAL SAMPLES:", len(X))
+
+# ==============================
+# TRAIN TEST SPLIT
+# ==============================
+X_train, X_test, y_train, y_test = train_test_split(
+    X,
+    y,
+    test_size=0.2,
+    random_state=42
+)
+
+# ==============================
+# RANDOM FOREST
+# ==============================
+model = RandomForestClassifier(
+    n_estimators=400,
+    max_depth=20,
+    random_state=42
+)
+
+# ==============================
+# TRAIN MODEL
+# ==============================
+print("\n🔥 TRAINING RANDOM FOREST...")
+
+model.fit(X_train, y_train)
+
+# ==============================
+# EVALUATE
+# ==============================
+preds = model.predict(X_test)
+
+acc = accuracy_score(y_test, preds)
+
+print(
+    f"\n✅ ACCURACY: "
+    f"{acc*100:.2f}%"
+)
+
+print("✅ TRAINING COMPLETE!")
+
+# ==============================
+# TKINTER GUI
+# ==============================
+root = tk.Tk()
+
+root.title(
+    "EMG Prosthetic Arm"
+)
+
+root.geometry("700x500")
+
+label_text = tk.StringVar()
+
+label_text.set("READY")
+
+label = tk.Label(
+    root,
+    textvariable=label_text,
+    font=("Arial", 50)
+)
+
+label.pack(pady=30)
+
+conf_text = tk.StringVar()
+
+conf_label = tk.Label(
+    root,
+    textvariable=conf_text,
+    font=("Arial", 20)
+)
+
+conf_label.pack()
+
+status_text = tk.StringVar()
+
+status_text.set("AUTO MODE")
+
+status_label = tk.Label(
+    root,
+    textvariable=status_text,
+    font=("Arial", 20)
+)
+
+status_label.pack(pady=20)
+
+# ==============================
+# SEND COMMAND
+# ==============================
+def send_command(cmd):
+
+    ser.write(
+        (cmd + "\n").encode()
+    )
+
+# ==============================
+# CONTROL MODE
+# ==============================
+manual_mode = False
+
+# ==============================
+# KEYBOARD CONTROL
+# ==============================
+def key_control(event):
+
+    global manual_mode
+
+    key = event.keysym.lower()
+
+    # ==========================
+    # TOGGLE AUTO / MANUAL
+    # ==========================
+    if key == "m":
+
+        manual_mode = not manual_mode
+
+        if manual_mode:
+
+            status_text.set(
+                "MANUAL MODE"
+            )
+
+            print("\nMANUAL MODE")
+
+        else:
+
+            status_text.set(
+                "AUTO MODE"
+            )
+
+            print("\nAUTO MODE")
+
+    # ==========================
+    # MANUAL CONTROLS
+    # ==========================
+    if manual_mode:
+
+        # ======================
+        # OPEN / CLOSE
+        # ======================
+        if key == "o":
+
+            send_command("OPEN")
+
+            label_text.set("OPEN")
+
+        elif key == "c":
+
+            send_command("CLOSE")
+
+            label_text.set("CLOSE")
+
+        # ======================
+        # WRIST
+        # ======================
+        elif key == "p":
+
+            send_command("PRONATION")
+
+            label_text.set("PRONATION")
+
+        elif key == "s":
+
+            send_command("SUPINATION")
+
+            label_text.set("SUPINATION")
+
+        # ======================
+        # INDIVIDUAL FINGERS
+        # ======================
+        elif key == "1":
+
+            send_command("THUMB")
+
+            label_text.set("THUMB")
+
+        elif key == "2":
+
+            send_command("POINTER")
+
+            label_text.set("POINTER")
+
+        elif key == "3":
+
+            send_command("MIDDLE")
+
+            label_text.set("MIDDLE")
+
+        elif key == "4":
+
+            send_command("RING")
+
+            label_text.set("RING")
+
+        elif key == "5":
+
+            send_command("LITTLE")
+
+            label_text.set("LITTLE")
+
+        # ======================
+        # REST
+        # ======================
+        elif key == "r":
+
+            send_command("REST")
+
+            label_text.set("REST")
+
+# ==============================
+# BIND KEYBOARD
+# ==============================
+root.bind("<Key>", key_control)
+
+# ==============================
+# PREDICTION SETTINGS
+# ==============================
+pred_buffer = deque(maxlen=5)
+
+current_gesture = "REST"
+
+buffer = []
+
+last_prediction_time = 0
+
+# ==============================
+# REAL TIME LOOP
+# ==============================
+def update():
+
+    global buffer
+
+    global current_gesture
+
+    global last_prediction_time
+
+    global manual_mode
+
+    # ==========================
+    # SKIP AUTO IN MANUAL MODE
+    # ==========================
+    if manual_mode:
+
+        root.after(1, update)
+
+        return
+
+    val = read_emg()
+
+    if val is None:
+
+        root.after(1, update)
+
+        return
+
+    buffer.append(val)
+
+    if len(buffer) >= window_size:
+
+        try:
+
+            seg = np.array(
+                buffer[-window_size:]
+            )
+
+            seg = notch_filter(seg)
+
+            seg = bandpass_filter(seg)
+
+            seg = seg / 1023.0
+
+            seg = (
+                seg - np.mean(seg)
+            ) / (
+                np.std(seg) + 1e-8
+            )
+
+            features = extract_features(seg)
+
+            features = np.array(
+                features
+            ).reshape(1, -1)
+
+            pred = model.predict(features)[0]
+
+            probs = model.predict_proba(
+                features
+            )[0]
+
+            confidence = np.max(probs)
+
+            label_pred = le.inverse_transform(
+                [pred]
+            )[0]
+
+            pred_buffer.append(label_pred)
+
+            most_common = max(
+                set(pred_buffer),
+                key=pred_buffer.count
+            )
+
+            stable_count = pred_buffer.count(
+                most_common
+            )
+
+            if (
+                stable_count >= 3
+                and confidence > 0.65
+            ):
+
+                if (
+                    time.time()
+                    - last_prediction_time
+                    > 0.2
+                ):
+
+                    if current_gesture != most_common:
+
+                        current_gesture = most_common
+
+                        last_prediction_time = time.time()
+
+                        label_text.set(
+                            most_common.upper()
+                        )
+
+                        conf_text.set(
+                            f"Confidence: "
+                            f"{confidence:.2f}"
+                        )
+
+                        print(
+                            f"\nGesture: "
+                            f"{most_common}"
+                        )
+
+                        print(
+                            f"Confidence: "
+                            f"{confidence:.2f}"
+                        )
+
+                        # ======================
+                        # SEND TO ARDUINO
+                        # ======================
+                        if most_common == "open":
+
+                            send_command("OPEN")
+
+                        elif most_common == "close":
+
+                            send_command("CLOSE")
+
+                        elif most_common == "pronation":
+
+                            send_command("PRONATION")
+
+                        elif most_common == "supination":
+
+                            send_command("SUPINATION")
+
+                        elif most_common == "rest":
+
+                            send_command("REST")
+
+            buffer = buffer[step:]
+
+        except Exception as e:
+
+            print("Prediction Error:", e)
+
+    root.after(1, update)
+
+# ==============================
+# START
+# ==============================
+print("\n🚀 STARTING REAL-TIME DETECTION...")
+
+print("\nKEYBOARD CONTROLS:")
+
+print("M = Toggle Manual/Auto")
+
+print("O = Open Hand")
+
+print("C = Close Hand")
+
+print("P = Pronation")
+
+print("S = Supination")
+
+print("1 = Thumb")
+
+print("2 = Pointer")
+
+print("3 = Middle")
+
+print("4 = Ring")
+
+print("5 = Little")
+
+print("R = Rest")
+
+update()
+
+root.mainloop()
